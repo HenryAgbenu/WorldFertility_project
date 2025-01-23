@@ -1,0 +1,298 @@
+---
+title: "Total Fertility_finalproject"
+author: "Henry Agbenu"
+format:
+  dashboard:
+    nav-buttons: [github]
+    github: https://github.com/YOUR_URL
+theme: lux
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+if(!require(pacman))install.packages("pacman")
+  pacman::p_load(tidyverse, rnaturalearth, sf,
+                 reactable, ggplot2, plotly, bslib,bsicons,
+                 janitor, here, htmltools, countrycode)
+```
+
+```{r}
+# Load data of world countries with its geometries
+countries_world <- rnaturalearth::ne_countries()
+
+# Import fertility data
+total_fertility <- read_csv(here("final project/children_per_woman_total_fertility.csv"))
+
+# select fertility by year
+total_fertility_2050 <- total_fertility %>%
+  select(country, `2000`:`2050`) %>%
+  pivot_longer(
+    cols = `2000`:`2050`,
+    names_to = "year",
+    values_to = "fertility_rate"
+  )
+
+#past fertility rate
+past_fertility_2050 <- total_fertility %>%
+  select(country, `2000`:`2025`) %>%
+  pivot_longer(
+    cols = `2000`:`2025`,
+    names_to = "year",
+    values_to = "fertility_rate"
+  )
+  
+#future fertility rate
+future_fertility_2050 <- total_fertility %>%
+  select(country, `2025`:`2050`) %>%
+  pivot_longer(
+    cols = `2025`:`2050`,
+    names_to = "year",
+    values_to = "fertility_rate"
+  )
+
+
+# Join both dataset above
+new_fertility_50 <- total_fertility_2050 %>% 
+  left_join(countries_world, by = c(country ="name"))
+
+#calculate the highest average over 50 yrs(2000-2050)
+high_average_overtime <- new_fertility_50 %>% 
+  group_by(country) %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(desc(average_fertility)) %>%
+  slice(1) %>% 
+  pull() %>% 
+  round(1)
+
+high_average_country <- new_fertility_50 %>% 
+  group_by(country) %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(desc(average_fertility)) %>%
+  slice(1) %>% 
+  pull(country)
+
+
+#calculate the lowest average over 50 yrs(2000-2050)
+low_average_overtime <- new_fertility_50 %>% 
+  group_by(country) %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(average_fertility) %>%
+  slice(1) %>% 
+  pull() %>% 
+  round(1)
+
+low_average_country <- new_fertility_50 %>% 
+  group_by(country) %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(average_fertility) %>%
+  slice(1) %>% 
+  pull(country)
+
+
+#calculate the next generation average fertility rate of Ghana (2025-2050)
+future_average_overtime <- future_fertility_2050 %>% 
+  filter(country=="Ghana") %>% 
+  group_by() %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(average_fertility) %>%
+  slice(1) %>% 
+  pull() %>% 
+  round(1)
+
+
+#calculate the past generation average fertility rate of Ghana (2025-2050)
+past_average_overtime <- past_fertility_2050 %>% 
+  filter(country=="Ghana") %>% 
+  group_by() %>%
+  summarize(average_fertility = mean(fertility_rate, na.rm = TRUE)) %>%
+  arrange(average_fertility) %>%
+  slice(1) %>% 
+  pull() %>% 
+  round(1)
+
+
+# mean 25 years fertility rate
+mean_25 <- new_fertility_50 %>% 
+  select(country, fertility_rate) %>%              
+  group_by(country) %>%                            
+  summarise(
+    mean_fertility_rate = mean(fertility_rate, na.rm = TRUE)
+  )
+
+# mean 25 years fertility rate distribution of countries
+
+top_10_countries <- mean_25 %>%
+  arrange(desc(mean_fertility_rate)) %>%
+  head(10)
+
+
+# graph of top 10
+library(ggplot2)
+
+bar_plot <- ggplot(top_10_countries, aes(x = reorder(country, mean_fertility_rate), 
+                                          y = mean_fertility_rate, 
+                                          text = paste("Country:", country, "<br>Mean Fertility Rate:", round(mean_fertility_rate, 2)))) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Top 10 Countries with Highest Mean Fertility Rate (2000-2024)",
+       x = "Country",
+       y = "Mean Fertility Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+#join mean to rnaturalearth data
+mean_fert_rnatural <- mean_25 %>% 
+  left_join(countries_world, c(country ="name"))
+
+#convert to sf object
+mean_sf <- st_as_sf(mean_fert_rnatural)
+  
+# 25 years geographical distribution of fertility rate from year 2000-2024
+
+cleaned_data_sf <- mean_sf[!is.na(mean_sf$featurecla), ] # clean NA's
+
+fertility_dist <- ggplot(cleaned_data_sf) +
+  geom_sf(aes(fill = mean_fertility_rate), color = "black") +
+  theme_minimal() +
+  ggtitle("Geographical Distribution of Average Fertility Rate (2000-2024)") +
+  theme(plot.title = element_text(hjust = 2))
+
+
+
+# map indicating 2019 gdp
+
+gdp_2019 <- cleaned_data_sf %>% 
+  select(country, mean_fertility_rate, gdp_md,income_grp) %>%
+  ggplot()+
+  geom_sf(aes(fill= gdp_md))+
+  theme_minimal()+
+  labs(title = "Geographical Distribution of 2019 GDP")
+
+
+
+
+# 50 Years trend of the Ghana, Somalia, Hong-Kong, China
+
+trend_50 <- total_fertility_2050 %>% 
+  filter(country %in% c("Somalia", "Hong Kong, China", "Ghana")) %>%
+  ggplot(aes(x = year, y = fertility_rate, color = country)) +
+  geom_point() +
+  labs(title = "50-Year Trend of Fertility Rate (2000-2050)", 
+       x = "Year", 
+       y = "Fertility Rate", 
+       color = "Country") +
+  theme_minimal()
+
+
+
+```
+
+# Home
+
+## Row 1 {height= 40}
+
+```{r}
+value_box(
+  title = "All time (2000-2050) Highest Average",
+  value = high_average_overtime,
+  showcase = bsicons::bs_icon("egg"),
+  theme = value_box_theme(bg = "#e6108d"),
+  p(paste0("(",high_average_country , " fertility rate)"))
+)
+
+
+```
+
+```{r}
+value_box(
+  title = "All time (2000-2050) Lowest Average",
+  value = low_average_overtime,
+  showcase = bsicons::bs_icon("thermometer"),
+  theme = value_box_theme(bg = "#07d3f76"),
+  p(paste0("(", low_average_country, " Fertility Rate)"))
+)
+
+```
+
+## Row 2 {height= 40}
+
+```{r}
+value_box(
+  title = "Future Average For Ghana, (2025-2050)",
+  value = future_average_overtime,
+  showcase = bsicons::bs_icon("water"),
+  theme = value_box_theme(bg = "#074ff7"),
+  p(paste0("(", future_average_overtime, " Ghana)"))
+)
+
+```
+
+```{r}
+value_box(
+  title = "Past Average For Ghana, 2000-2024",
+  value = past_average_overtime,
+  showcase = bsicons::bs_icon("hospital"),
+  theme = value_box_theme(bg = "#3b663c"),
+  p(paste0("(", past_average_overtime, " Ghana)"))
+)
+
+```
+
+# Graphs
+
+## Row 1 {width="100"}
+
+```{r}
+plot(trend_50)
+```
+
+```{r}
+ggplotly(bar_plot)
+
+```
+
+# Maps
+
+## Row 1 {height= 100}
+
+```{r}
+ggplotly(gdp_2019)
+```
+
+```{r}
+ggplotly(fertility_dist)
+
+```
+
+# Download Data
+
+```{r}
+library(htmltools)
+
+htmltools::browsable(
+  tagList(
+    reactable(
+      total_fertility, 
+      elementId = "Total Fertility", 
+      searchable = TRUE, 
+      filterable = TRUE
+    ),
+    tags$button(
+      "Download as CSV", 
+      onclick = "Reactable.downloadDataCSV('total_fertility')"
+    )
+  )
+)
+
+
+```
+
+# About
+
+Description: This is the number of children that would be born to a woman if she were to live to the end of her child bbearing years and bear children in accordance with age-specific fertility rates of the specified year. It expresses the statistical indicator total fertility rate.
+
+Source: https://www.gapminder.org/data/
